@@ -52,7 +52,7 @@ def save_prediction(user_id, match_id, h_score, a_score, scorer):
 # ==========================================
 
 st.set_page_config(page_title="Predicty 25/26", page_icon="⚽", layout="wide")
-st.title("⚽ Liga Predict - Sezon 2025/2026")
+st.title("⚽ Liga Predicty - Sezon 2025/2026")
 
 # --- LOGOWANIE ---
 if 'user_id' not in st.session_state:
