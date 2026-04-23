@@ -4,8 +4,8 @@ from datetime import datetime
 
 st.title("🏆 Liga Predict - MS 2026")
 
-# Tutaj trafi Twój klucz API (bezpieczniej będzie go potem ukryć)
-API_KEY = "TWÓJ_KLUCZ_Z_API_FOOTBALL"
+# klucz API 
+API_KEY = "7d0575164002aad2416ed0759bc40950"
 
 def get_fixtures():
     url = "https://v3.football.api-sports.io/fixtures?league=1&season=2026" # League 1 to World Cup
