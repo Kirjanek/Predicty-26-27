@@ -31,11 +31,12 @@ def save_prediction(user_id, match_id, h_score, a_score, scorer):
     try:
         data = {
             "user_id": user_id,
-            "match_id": match_id,
+            "match_id": str(match_id),
             "home_score": int(h_score),
             "away_score": int(a_score),
             "scorer_name": scorer
         }
+        # Używamy rpc lub bezpośredniego upsert
         supabase.table("predictions").upsert(data).execute()
         return True
     except Exception as e:
@@ -57,8 +58,8 @@ if 'user_id' not in st.session_state:
                 st.session_state.user_id = res.user.id
                 st.session_state.user_email = res.user.email
                 st.rerun()
-            except:
-                st.error("Błędne dane logowania.")
+            except Exception as e:
+                st.error("Nieprawidłowy email lub hasło.")
 else:
     st.sidebar.success(f"Gracz: {st.session_state.user_email}")
     if st.sidebar.button("Wyloguj"):
@@ -69,6 +70,8 @@ else:
 
     with tab1:
         fixtures = get_fixtures()
+        if not fixtures:
+            st.warning("Nie znaleziono nadchodzących meczów.")
         for f in fixtures:
             with st.expander(f"🗓️ {f['date'][:16].replace('T', ' ')} | {f['home']} vs {f['away']}"):
                 c1, c2 = st.columns(2)
@@ -77,19 +80,29 @@ else:
                 scorer = st.text_input("Strzelec (Nazwisko)", key=f"s{f['id']}")
                 
                 if st.button("Zapisz Typ", key=f"b{f['id']}"):
-                    if scorer and save_prediction(st.session_state.user_id, f['id'], h_s, a_s, scorer):
-                        st.success("Zapisano!")
+                    if not scorer:
+                        st.warning("Podaj strzelca!")
+                    elif save_prediction(st.session_state.user_id, f['id'], h_s, a_s, scorer):
+                        st.success("Zapisano pomyślnie!")
 
     with tab2:
         st.subheader("Ranking")
-        res = supabase.table("profiles").select("username, points").order("points", desc=True).execute()
-        if res.data:
-            st.table(pd.DataFrame(res.data))
-        else:
-            st.write("Ranking będzie dostępny po podliczeniu pierwszej kolejki.")
+        try:
+            res = supabase.table("profiles").select("username, points").order("points", desc=True).execute()
+            if res.data:
+                st.table(pd.DataFrame(res.data))
+            else:
+                st.info("Brak graczy w rankingu.")
+        except:
+            st.error("Nie udało się pobrać rankingu (Tabela profiles może być pusta).")
 
     with tab3:
         st.subheader("Twoje wysłane typy")
-        my = supabase.table("predictions").select("match_id, home_score, away_score, scorer_name").eq("user_id", st.session_state.user_id).execute()
-        if my.data:
-            st.dataframe(pd.DataFrame(my.data))
+        try:
+            my = supabase.table("predictions").select("match_id, home_score, away_score, scorer_name").eq("user_id", st.session_state.user_id).execute()
+            if my.data and len(my.data) > 0:
+                st.dataframe(pd.DataFrame(my.data))
+            else:
+                st.info("Jeszcze nic nie wytypowałeś.")
+        except:
+            st.error("Nie udało się pobrać Twoich typów.")
