@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 from datetime import datetime
 
-st.title("🏆 Liga Predict - MS 2026")
+st.title("🏆 Liga Predicty - MŚ 2026")
 
 # klucz API 
 API_KEY = "7d0575164002aad2416ed0759bc40950"
