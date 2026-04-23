@@ -5,7 +5,7 @@ import pandas as pd
 from supabase import create_client
 
 # ==========================================
-# 1. KONFIGURACJA (WPISZ SWOJE DANE)
+# 1. KONFIGURACJA
 # ==========================================
 SUPABASE_URL = "https://edrlnpuyvpzbdlffwbim.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVkcmxucHV5dnB6YmRsZmZ3YmltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5NTA4NTksImV4cCI6MjA5MjUyNjg1OX0._dzKIbr9ZmmRfihW7WRmUK_d41RJF7DYAk5aTqjJmZI"
@@ -19,11 +19,23 @@ HEADERS = {'x-apisports-key': API_KEY}
 # ==========================================
 
 def get_fixtures(league_id=39, season=2025):
-    """Pobiera nadchodzące mecze z sezonu 25/26."""
-    # season=2025 odpowiada kampanii 2025/2026
-    url = f"https://v3.football.api-sports.io/fixtures?league={league_id}&season={season}&next=20"
-    res = requests.get(url, headers=HEADERS).json()
-    return res.get('response', [])
+    """Pobiera mecze od dziś do końca sezonu 25/26."""
+    # Definiujemy zakres dat (od dziś do końca maja 2026)
+    today = datetime.now().strftime('%Y-%m-%d')
+    end_season = "2026-05-31"
+    
+    # Używamy filtrów daty, co jest skuteczniejsze w końcówce sezonu
+    url = f"https://v3.football.api-sports.io/fixtures?league={league_id}&season={season}&from={today}&to={end_season}"
+    
+    try:
+        res = requests.get(url, headers=HEADERS).json()
+        fixtures = res.get('response', [])
+        # Sortujemy chronologicznie
+        fixtures.sort(key=lambda x: x['fixture']['date'])
+        return fixtures
+    except Exception as e:
+        st.error(f"Błąd pobierania meczów: {e}")
+        return []
 
 @st.cache_data(ttl=3600)
 def get_players_list(team_id):
@@ -35,7 +47,7 @@ def get_players_list(team_id):
     return []
 
 def save_prediction(user_id, match_id, h_score, a_score, scorer):
-    """Zapisuje typ do Supabase."""
+    """Zapisuje lub aktualizuje typ w Supabase."""
     data = {
         "user_id": user_id,
         "match_id": match_id,
@@ -44,7 +56,7 @@ def save_prediction(user_id, match_id, h_score, a_score, scorer):
         "scorer_name": scorer,
         "created_at": datetime.now().isoformat()
     }
-    # Upewnij się, że tabela 'predictions' ma Primary Key na (user_id, match_id)
+    # .upsert wymaga klucza UNIQUE (user_id, match_id) w bazie, który już dodałeś
     supabase.table("predictions").upsert(data).execute()
 
 # ==========================================
@@ -66,7 +78,7 @@ if 'user_id' not in st.session_state:
                 st.session_state['user_id'] = res.user.id
                 st.session_state['user_email'] = res.user.email
                 st.rerun()
-            except Exception as e:
+            except Exception:
                 st.error("Nieprawidłowy email lub hasło.")
 else:
     # --- PASEK BOCZNY ---
@@ -83,23 +95,21 @@ else:
         fixtures = get_fixtures(league_id=39, season=2025)
         
         if not fixtures:
-            st.info("API nie udostępniło jeszcze terminarza na ten sezon lub mecze się zakończyły.")
+            st.info("Nie znaleziono nadchodzących meczów na ten okres.")
         
         for f in fixtures:
             fid = f['fixture']['id']
             home = f['teams']['home']
             away = f['teams']['away']
-            # Konwersja daty
             match_date = datetime.fromisoformat(f['fixture']['date'].replace('Z', '+00:00'))
             
             with st.expander(f"🗓️ {match_date.strftime('%d.%m %H:%M')} | {home['name']} vs {away['name']}"):
-                # Blokada czasowa (serwerowa)
+                # Blokada czasowa (nie można typować po rozpoczęciu meczu)
                 if datetime.now().astimezone() < match_date:
                     c1, c2 = st.columns(2)
                     h_score = c1.number_input(f"Gole: {home['name']}", 0, 15, key=f"h_{fid}")
                     a_score = c2.number_input(f"Gole: {away['name']}", 0, 15, key=f"a_{fid}")
                     
-                    # Pobieranie listy piłkarzy
                     with st.spinner('Ładowanie listy strzelców...'):
                         players = get_players_list(home['id']) + get_players_list(away['id'])
                         players = sorted(list(set(players)))
@@ -108,26 +118,33 @@ else:
                     
                     if st.button("Wyślij Predict", key=f"btn_{fid}"):
                         save_prediction(st.session_state['user_id'], fid, h_score, a_score, scorer)
-                        st.success(f"Zapisano! {home['name']} {h_score}:{a_score} {away['name']} (Strzelec: {scorer})")
+                        st.success("Typ zapisany!")
                 else:
-                    st.error("🔒 Mecz już trwa lub się zakończył. Nie można zmieniać typów.")
+                    st.error("🔒 Mecz już trwa lub się zakończył.")
 
     # --- TAB 2: RANKING ---
     with tab2:
         st.header("Ranking Graczy")
-        res = supabase.table("profiles").select("username, points").order("points", desc=True).execute()
-        if res.data:
-            df = pd.DataFrame(res.data)
-            df.index += 1
-            st.table(df)
-        else:
-            st.write("Brak danych w rankingu.")
+        try:
+            res = supabase.table("profiles").select("username, points").order("points", desc=True).execute()
+            if res.data:
+                df = pd.DataFrame(res.data)
+                df.columns = ["Gracz", "Punkty"]
+                df.index += 1
+                st.table(df)
+            else:
+                st.write("Ranking jest jeszcze pusty.")
+        except Exception as e:
+            st.error(f"Błąd bazy danych: {e}")
 
     # --- TAB 3: MOJE TYPY ---
     with tab3:
         st.header("Twoje ostatnie typy")
-        my_preds = supabase.table("predictions").select("*").eq("user_id", st.session_state['user_id']).execute()
-        if my_preds.data:
-            st.json(my_preds.data)
-        else:
-            st.write("Jeszcze nic nie wytypowałeś.")
+        try:
+            my_preds = supabase.table("predictions").select("*").eq("user_id", st.session_state['user_id']).execute()
+            if my_preds.data:
+                st.write(pd.DataFrame(my_preds.data))
+            else:
+                st.write("Jeszcze nic nie wytypowałeś.")
+        except Exception as e:
+            st.error(f"Błąd pobierania typów: {e}")
