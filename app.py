@@ -18,7 +18,7 @@ HEADERS = {'x-apisports-key': API_KEY}
 # 2. FUNKCJE API I LOGIKA
 # ==========================================
 
-def get_fixtures(league_id=39, season=2025):
+def get_fixtures(league_id=39, season=2024):
     """Pobiera mecze od dziś do końca sezonu 25/26."""
     # Definiujemy zakres dat (od dziś do końca maja 2026)
     today = datetime.now().strftime('%Y-%m-%d')
