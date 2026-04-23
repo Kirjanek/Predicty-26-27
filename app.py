@@ -21,7 +21,7 @@ HEADERS = {'x-apisports-key': API_KEY}
 def get_fixtures(league_id=39, season=2025):
     """Pobiera nadchodzące mecze z sezonu 25/26."""
     # season=2025 odpowiada kampanii 2025/2026
-    url = f"https://v3.football.api-sports.io/fixtures?league={league_id}&season={season}&next=15"
+    url = f"https://v3.football.api-sports.io/fixtures?league={league_id}&season={season}&next=20"
     res = requests.get(url, headers=HEADERS).json()
     return res.get('response', [])
 
