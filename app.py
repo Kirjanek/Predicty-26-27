@@ -15,11 +15,11 @@ if "supabase" not in st.session_state:
     st.session_state.supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ==========================================
-# 2. FUNKCJE API
+# 2. FUNKCJE
 # ==========================================
 
-@st.cache_data(ttl=600) # Zapamiętuje mecze na 10 minut
 def get_fixtures():
+    """Pobiera mecze i przelicza czas na polski (UTC+2)."""
     url = "https://api.football-data.org/v4/competitions/PL/matches?status=SCHEDULED"
     headers = {'X-Auth-Token': FOOTBALL_TOKEN}
     try:
@@ -27,51 +27,36 @@ def get_fixtures():
         matches = res.get('matches', [])
         formatted = []
         for m in matches:
+            # Parsowanie daty UTC z API
             utc_date = datetime.strptime(m['utcDate'], "%Y-%m-%dT%H:%M:%SZ")
-            pl_date = utc_date + timedelta(hours=2) # Czas PL
+            # Konwersja na czas polski (UTC + 2 godziny)
+            pl_date = utc_date + timedelta(hours=2)
             
             formatted.append({
                 'id': str(m['id']),
                 'display_date': pl_date.strftime("%d.%m.%Y %H:%M"),
                 'raw_date': pl_date,
                 'home': m['homeTeam']['shortName'] or m['homeTeam']['name'],
-                'away': m['awayTeam']['shortName'] or m['awayTeam']['name'],
-                'home_id': m['homeTeam']['id'],
-                'away_id': m['awayTeam']['id']
+                'away': m['awayTeam']['shortName'] or m['awayTeam']['name']
             })
         return formatted[:15]
     except:
         return []
 
-@st.cache_data(ttl=3600) # Zapamiętuje składy na godzinę
-def get_players(home_id, away_id):
-    headers = {'X-Auth-Token': FOOTBALL_TOKEN}
-    players = []
-    try:
-        for team_id in [home_id, away_id]:
-            url = f"https://api.football-data.org/v4/teams/{team_id}"
-            res = requests.get(url, headers=headers).json()
-            squad = res.get('squad', [])
-            for p in squad:
-                if p['position'] in ['Offence', 'Midfield', 'Defence']:
-                    players.append(p['name'])
-        return sorted(list(set(players)))
-    except:
-        return ["Błąd pobierania listy"]
-
 def save_prediction(user_id, match_id, h_score, a_score, scorer):
+    """Zapisuje typ do bazy."""
     try:
         data = {
             "user_id": str(user_id),
             "match_id": str(match_id),
             "home_score": int(h_score),
             "away_score": int(a_score),
-            "scorer_name": str(scorer)
+            "scorer_name": str(scorer).strip()
         }
         st.session_state.supabase.table("predictions").upsert(data).execute()
         return True
     except Exception as e:
-        st.error(f"Błąd zapisu: {e}")
+        st.error(f"Błąd bazy: {e}")
         return False
 
 # ==========================================
@@ -94,13 +79,13 @@ if 'user_id' not in st.session_state:
             except:
                 st.error("Błędne dane logowania.")
 else:
-    st.sidebar.success(f"Gracz: {st.session_state.user_email}")
+    st.sidebar.success(f"Zalogowany: {st.session_state.user_email}")
     if st.sidebar.button("Wyloguj"):
         st.session_state.supabase.auth.sign_out()
         del st.session_state['user_id']
         st.rerun()
 
-    tab1, tab2, tab3 = st.tabs(["📝 Typuj Mecze", "🏆 Ranking", "📋 Moje Typy"])
+    tab1, tab2, tab3 = st.tabs(["📝 Typuj", "🏆 Ranking", "📋 Moje Typy"])
 
     with tab1:
         st.header("Nadchodzące mecze (Czas PL)")
@@ -108,6 +93,7 @@ else:
         now = datetime.now()
         
         for f in fixtures:
+            # Blokada po rozpoczęciu meczu
             is_blocked = now > f['raw_date']
             
             with st.expander(f"🗓️ {f['display_date']} | {f['home']} vs {f['away']}"):
@@ -118,19 +104,14 @@ else:
                     h_val = col1.number_input(f"Gole {f['home']}", 0, 15, key=f"h{f['id']}")
                     a_val = col2.number_input(f"Gole {f['away']}", 0, 15, key=f"a{f['id']}")
                     
-                    # Logika ładowania piłkarzy
-                    st.write("---")
-                    show_players = st.checkbox(f"Pobierz listę piłkarzy dla tego meczu", key=f"chk{f['id']}")
+                    sc = st.text_input("Kto strzeli gola? (Nazwisko)", key=f"s{f['id']}")
                     
-                    if show_players:
-                        player_list = get_players(f['home_id'], f['away_id'])
-                        sc = st.selectbox("Kto strzeli gola?", ["Brak strzelca / Samobój"] + player_list, key=f"s{f['id']}")
-                        
-                        if st.button("Zatwierdź Predict", key=f"b{f['id']}"):
+                    if st.button("Zatwierdź Predict", key=f"b{f['id']}"):
+                        if not sc:
+                            st.warning("Wpisz nazwisko strzelca!")
+                        else:
                             if save_prediction(st.session_state.user_id, f['id'], h_val, a_val, sc):
                                 st.success("Zapisano!")
-                    else:
-                        st.info("Zaznacz powyższe pole, aby wybrać strzelca z listy.")
 
     with tab2:
         st.subheader("Ranking")
@@ -141,15 +122,15 @@ else:
             else:
                 st.write("Ranking będzie dostępny wkrótce.")
         except:
-            st.write("Błąd ładowania rankingu.")
+            st.write("Ranking jest chwilowo niedostępny.")
 
     with tab3:
-        st.subheader("Twoje ostatnie wysłane typy")
+        st.subheader("Twoje wysłane typy")
         try:
             my = st.session_state.supabase.table("predictions").select("match_id, home_score, away_score, scorer_name").eq("user_id", st.session_state.user_id).execute()
             if my.data:
                 st.dataframe(pd.DataFrame(my.data))
             else:
-                st.write("Nie masz jeszcze zapisanych typów.")
+                st.write("Brak zapisanych typów.")
         except:
-            st.write("Błąd pobierania typów.")
+            st.write("Błąd pobierania danych.")
