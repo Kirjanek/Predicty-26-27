@@ -36,11 +36,11 @@ def save_prediction(user_id, match_id, h_score, a_score, scorer):
             "away_score": int(a_score),
             "scorer_name": scorer
         }
-        # Używamy rpc lub bezpośredniego upsert
+        # Upsert nadpisuje typ, jeśli już istnieje dla tej pary user+mecz
         supabase.table("predictions").upsert(data).execute()
         return True
     except Exception as e:
-        st.error(f"Błąd zapisu: {e}")
+        st.error(f"Błąd bazy: {e}")
         return False
 
 # --- INTERFEJS ---
@@ -58,8 +58,8 @@ if 'user_id' not in st.session_state:
                 st.session_state.user_id = res.user.id
                 st.session_state.user_email = res.user.email
                 st.rerun()
-            except Exception as e:
-                st.error("Nieprawidłowy email lub hasło.")
+            except:
+                st.error("Błędne dane logowania.")
 else:
     st.sidebar.success(f"Gracz: {st.session_state.user_email}")
     if st.sidebar.button("Wyloguj"):
@@ -71,7 +71,7 @@ else:
     with tab1:
         fixtures = get_fixtures()
         if not fixtures:
-            st.warning("Nie znaleziono nadchodzących meczów.")
+            st.warning("Brak nadchodzących meczów.")
         for f in fixtures:
             with st.expander(f"🗓️ {f['date'][:16].replace('T', ' ')} | {f['home']} vs {f['away']}"):
                 c1, c2 = st.columns(2)
@@ -81,20 +81,21 @@ else:
                 
                 if st.button("Zapisz Typ", key=f"b{f['id']}"):
                     if not scorer:
-                        st.warning("Podaj strzelca!")
+                        st.error("Wpisz nazwisko strzelca!")
                     elif save_prediction(st.session_state.user_id, f['id'], h_s, a_s, scorer):
-                        st.success("Zapisano pomyślnie!")
+                        st.success("Zapisano!")
 
     with tab2:
         st.subheader("Ranking")
         try:
+            # .execute() może zwrócić błąd, jeśli tabela jest całkiem pusta w specyficzny sposób
             res = supabase.table("profiles").select("username, points").order("points", desc=True).execute()
-            if res.data:
+            if res.data and len(res.data) > 0:
                 st.table(pd.DataFrame(res.data))
             else:
-                st.info("Brak graczy w rankingu.")
-        except:
-            st.error("Nie udało się pobrać rankingu (Tabela profiles może być pusta).")
+                st.write("Ranking jest pusty. Dodaj graczy do tabeli profiles.")
+        except Exception as e:
+            st.write("Ranking będzie dostępny, gdy pojawią się pierwsi gracze.")
 
     with tab3:
         st.subheader("Twoje wysłane typy")
@@ -103,6 +104,6 @@ else:
             if my.data and len(my.data) > 0:
                 st.dataframe(pd.DataFrame(my.data))
             else:
-                st.info("Jeszcze nic nie wytypowałeś.")
+                st.write("Jeszcze nic nie wytypowałeś.")
         except:
-            st.error("Nie udało się pobrać Twoich typów.")
+            st.write("Brak zapisanych typów.")
